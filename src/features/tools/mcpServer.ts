@@ -7,6 +7,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import { Schema } from "effect";
 import type { Page } from "playwright";
 import { DEFAULT_PERMISSION_MODE } from "@/config";
 import type { PermissionMode, ToolDef, ToolResult } from "@/features/domain";
@@ -623,6 +624,26 @@ for (const tool of [
   toolRegistry.set(tool.name, tool);
 }
 
+const decodeRepositoryToolArgs = (
+  name: string,
+  args: Record<string, unknown>,
+): Record<string, unknown> => {
+  switch (name) {
+    case "grep_code":
+      return Schema.decodeUnknownSync(GrepCodeArgsSchema)(args);
+    case "read_file":
+      return Schema.decodeUnknownSync(ReadFileArgsSchema)(args);
+    case "apply_patch":
+      return Schema.decodeUnknownSync(ApplyPatchArgsSchema)(args);
+    case "run_tests":
+      return Schema.decodeUnknownSync(RunTestsArgsSchema)(args);
+    case "git_diff":
+      return Schema.decodeUnknownSync(GitDiffArgsSchema)(args);
+    default:
+      throw new Error(`Unknown repository tool: ${name}`);
+  }
+};
+
 const toolActionStatus = (toolResult: ToolResult, blocked: boolean): McpToolAction["status"] => {
   if (blocked) return "blocked";
   if (toolResult.ok) return "completed";
@@ -724,6 +745,35 @@ const callToolHandler = async (input: {
     ...input.args,
     _repoRoot: input.repoRoot,
     _page: page,
+  });
+};
+
+export const executeRepositoryTool = async (input: {
+  readonly repoRoot: string;
+  readonly permissionMode: PermissionMode;
+  readonly name: string;
+  readonly args: Record<string, unknown>;
+}): Promise<ToolResult> => {
+  const tool = toolRegistry.get(input.name);
+  if (tool === undefined) {
+    return { ok: false, output: `Unknown repository tool: ${input.name}`, error: "unknown-tool" };
+  }
+  let decodedArgs: Record<string, unknown>;
+  try {
+    decodedArgs = decodeRepositoryToolArgs(input.name, input.args);
+  } catch (error) {
+    return {
+      ok: false,
+      output: error instanceof Error ? error.message : String(error),
+      error: "invalid-tool-arguments",
+    };
+  }
+  return executeToolCall({
+    repoRoot: input.repoRoot,
+    options: { getPermissionMode: () => input.permissionMode },
+    name: input.name,
+    tool,
+    args: decodedArgs,
   });
 };
 

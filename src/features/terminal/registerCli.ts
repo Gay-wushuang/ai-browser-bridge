@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 import { DEFAULT_ASK_TIMEOUT_SECONDS, DEFAULT_PROVIDER, PROVIDER_IDS } from "@/config";
 import {
+  runAgent,
   runAsk,
   runBrowserStatus,
   runCacheList,
@@ -41,6 +42,7 @@ import {
   runTaskList,
 } from "./cliOperations.ts";
 import type {
+  AgentOptions,
   AskOptions,
   BrowserStatusOptions,
   CacheCmdOptions,
@@ -148,6 +150,23 @@ const registerHeadlessCommands = (program: Command): void => {
     )
     .action((promptParts: string[], _options: AskOptions, command: Command) =>
       runAsk(promptParts.join(" "), subcommandOpts(command)),
+    );
+  program
+    .command("agent [task...]")
+    .description("Let a web AI operate sandboxed repository tools through a JSON turn loop")
+    .option("-r, --repo <path>", "Target repository for local tools")
+    .option("--provider <name>", PROVIDER_OPTION)
+    .option("--permissions <mode>", "Tool permissions: read-only or auto (default read-only)")
+    .option("--max-turns <number>", "Maximum web/tool turns (default 12)")
+    .option("--timeout <seconds>", "Maximum seconds per web reply")
+    .option("--fresh", "Start a new conversation before the task")
+    .option("--conversation <idOrUrl>", "Open a Conversation before the task")
+    .option("--model <name>", "Switch model before the task")
+    .option("--json", "Emit the agent result as JSON")
+    .option("--debug-port <number>", "Browser remote-debugging port (default 9222)")
+    .option("--profile <path>", "Browser user-data-dir (default shared bridge profile)")
+    .action((taskParts: string[], _options: AgentOptions, command: Command) =>
+      runAgent(taskParts.join(" "), subcommandOpts(command)),
     );
   program
     .command("download")

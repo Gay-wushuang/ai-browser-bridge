@@ -15,7 +15,11 @@ import {
   FanoutTasksSchema,
   fanOutConversations,
   fanoutFailed,
+  loadConfig,
+  runWebToolAgent,
+  saveConfig,
   startEngine,
+  type WebToolAgentResult,
 } from "@/features/bridge";
 import type { BrowserStatus, CacheInventory, PruneCacheResult } from "@/features/browser";
 import {
@@ -35,6 +39,7 @@ import type {
   CommandDef,
   ConnectorSetupResult,
   Message,
+  PermissionMode,
 } from "@/features/domain";
 import {
   findModelProfile,
@@ -137,6 +142,7 @@ import {
   updateChatOrganizationQueueVerification,
 } from "./chatOrganizationQueue.ts";
 import type {
+  AgentOptions,
   AskOptions,
   BrowserStatusOptions,
   BrowserTargetOptions,
@@ -154,6 +160,7 @@ import type {
   TaskCmdOptions,
 } from "./cliTypes.ts";
 import { providerDisplayName } from "./providerLabel.ts";
+import { LaunchPanel, type LaunchSelection } from "./tui/launcher/LaunchPanel.tsx";
 import { BridgeApp } from "./tui/shell/App.tsx";
 
 const SESSION_COMMANDS: CommandMeta[] = [
@@ -2144,9 +2151,9 @@ const prepareAskRun = async (options: AskOptions) => {
     provider: providers.provider,
     supportsMcpConnector: providers.browserProvider.supportsMcpConnector,
   });
-  registerAskSignalHandlers(engine);
+  const removeSignalHandlers = registerAskSignalHandlers(engine);
   await assertSignedIn(engine, providers.browserProvider, providers.provider);
-  return { engine, ...providers };
+  return { engine, removeSignalHandlers, ...providers };
 };
 
 const askProvidersFrom = (options: AskOptions) => {
@@ -2160,6 +2167,7 @@ const finishAskRun = async (input: {
   orchestratorError: string | null;
   options: AskOptions;
 }): Promise<void> => {
+  input.setup.removeSignalHandlers();
   await input.setup.engine.shutdown({ closeBrowser: false });
   writeAskOutput({
     engine: input.setup.engine,
@@ -2186,9 +2194,17 @@ const startAskEngine = async (input: StartAskEngineInput) => {
   });
 };
 
-const registerAskSignalHandlers = (engine: Awaited<ReturnType<typeof startEngine>>): void => {
-  process.once("SIGINT", () => void abortAndExit(engine, 130, process.exit));
-  process.once("SIGTERM", () => void abortAndExit(engine, 143, process.exit));
+const registerAskSignalHandlers = (
+  engine: Awaited<ReturnType<typeof startEngine>>,
+): (() => void) => {
+  const onInterrupt = () => void abortAndExit(engine, 130, process.exit);
+  const onTerminate = () => void abortAndExit(engine, 143, process.exit);
+  process.once("SIGINT", onInterrupt);
+  process.once("SIGTERM", onTerminate);
+  return () => {
+    process.off("SIGINT", onInterrupt);
+    process.off("SIGTERM", onTerminate);
+  };
 };
 
 const imageCountFromOption = (value: string | undefined): number | undefined => {
@@ -3452,14 +3468,150 @@ const renderBridgeApp = (input: {
   );
 };
 
+const initialLaunchSelection = async (
+  options: CliOptions & { browser?: boolean },
+): Promise<LaunchSelection> => {
+  const repoPath = repositoryRoot(options.repo);
+  const savedConfig = await loadConfig(repoPath);
+  let provider = providerIdFrom(savedConfig.provider);
+  if (options.provider !== undefined) provider = providerIdFrom(options.provider);
+  const savedPermissionMode = normalizePermissionMode(savedConfig.permissionMode);
+  let permissionMode: PermissionMode = "read-only";
+  if (savedPermissionMode === "auto") permissionMode = "auto";
+  return {
+    mode: "agent",
+    repoPath,
+    provider,
+    permissionMode,
+    fresh: false,
+    task: "",
+  };
+};
+
+const selectLaunchConfiguration = async (
+  initial: LaunchSelection,
+): Promise<LaunchSelection | undefined> => {
+  let selected: LaunchSelection | undefined;
+  const app = render(
+    React.createElement(LaunchPanel, {
+      initial,
+      onSelect: (selection: LaunchSelection) => {
+        selected = selection;
+      },
+      onCancel: () => {
+        selected = undefined;
+      },
+    }),
+  );
+  await app.waitUntilExit();
+  return selected;
+};
+
+const saveLaunchSelection = async (selection: LaunchSelection): Promise<void> => {
+  const repoPath = repositoryRoot(resolve(selection.repoPath));
+  const config = await loadConfig(repoPath, {
+    provider: selection.provider,
+    permissionMode: selection.permissionMode,
+  });
+  await saveConfig(config);
+};
+
+const runLaunchSelection = async (
+  selection: LaunchSelection,
+  options: CliOptions & { browser?: boolean },
+): Promise<void> => {
+  await saveLaunchSelection(selection);
+  if (selection.mode === "conversation") {
+    await runTui({
+      ...options,
+      repo: selection.repoPath,
+      provider: selection.provider,
+    });
+    return;
+  }
+  const result = await executeAgentTask(selection.task, {
+    repo: selection.repoPath,
+    provider: selection.provider,
+    permissions: selection.permissionMode,
+    fresh: selection.fresh,
+  });
+  process.stdout.write(`\n${result.summary}\n\n`);
+};
+
 export const runInteractiveCli = async (
   options: CliOptions & { browser?: boolean },
 ): Promise<void> => {
-  await runTui(options);
+  let initial = await initialLaunchSelection(options);
+  while (true) {
+    const selection = await selectLaunchConfiguration(initial);
+    if (selection === undefined) return;
+    await runLaunchSelection(selection, options);
+    if (selection.mode === "conversation") return;
+    initial = { ...selection, fresh: false, task: "" };
+  }
 };
 
 export const runAsk = async (prompt: string, options: AskOptions): Promise<void> => {
   await runAskFlow({ prompt, options });
+};
+
+const agentPermissionMode = (
+  value: string | undefined,
+  savedMode: PermissionMode | undefined,
+): PermissionMode => {
+  if (value === undefined && savedMode === "auto") return "auto";
+  if (value === undefined) return "read-only";
+  if (value === "read-only" || value === "auto") return value;
+  return fail("--permissions must be read-only or auto.");
+};
+
+const agentMaxTurns = (value: string | undefined): number => {
+  if (value === undefined) return 12;
+  const parsed = Number.parseInt(value, 10);
+  if (Number.isSafeInteger(parsed) && parsed > 0 && parsed <= 50) return parsed;
+  return fail("--max-turns must be an integer from 1 to 50.");
+};
+
+const agentTimeoutMs = (value: string | undefined): number => {
+  const configuredTimeout = timeoutMsFromSeconds(value);
+  if (configuredTimeout !== undefined) return configuredTimeout;
+  return 90_000;
+};
+
+const executeAgentTask = async (
+  task: string,
+  options: AgentOptions,
+): Promise<WebToolAgentResult> => {
+  if (task.trim().length === 0)
+    return fail('Provide a task (e.g. `bridge agent "inspect README"`).');
+  process.stderr.write("Connecting to the bridge browser...\n");
+  const setup = await prepareAskRun(options);
+  process.stderr.write("Browser connected and Login verified. Starting the Agent loop...\n");
+  const permissionMode = agentPermissionMode(
+    options.permissions,
+    setup.engine.config.permissionMode,
+  );
+  try {
+    await applyAskPreflight({ engine: setup.engine, options });
+    return await runWebToolAgent({
+      engine: setup.engine,
+      task,
+      permissionMode,
+      maxTurns: agentMaxTurns(options.maxTurns),
+      timeoutMs: agentTimeoutMs(options.timeout),
+      onProgress: (message) => process.stderr.write(`${message}\n`),
+    });
+  } finally {
+    setup.removeSignalHandlers();
+    await setup.engine.shutdown({ closeBrowser: true });
+  }
+};
+
+export const runAgent = async (task: string, options: AgentOptions): Promise<void> => {
+  const result = await executeAgentTask(task, options);
+  if (options.json) process.stdout.write(`${JSON.stringify(result)}\n`);
+  else process.stdout.write(`${result.summary}\n`);
+  process.exit(result.completed ? 0 : 1);
 };
 
 const formatRenderStateLine = (state: ChatGptRenderState): string => {

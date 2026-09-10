@@ -14,17 +14,25 @@
 
 ---
 
-> 从终端驱动真实的 ChatGPT 或 Gemini 浏览器会话，并通过 MCP 给 ChatGPT 一组受限的本地仓库工具——永远不交给它一个 shell。
+> 把已登录的 ChatGPT 和其他网页版 AI 变成可读写本地仓库的安全编程智能体：复用 Chrome 或 Edge，无需模型 API，也不开放原始 Shell。
 
 ## 为什么需要它
 
 ChatGPT 在浏览器中表现最佳——真实的账户状态、模型选择器、消息编辑、重新生成以及会话历史都完整保留。而写代码在终端中最高效，可以直接检查和修改文件、测试、diff 与补丁。
 
-`ai-browser-bridge` 把这两个界面连接起来。终端中的一个提示词驱动你现有的提供商浏览器会话，而 ChatGPT 可以通过一小组**经过校验的 MCP 工具**——`grep`、`read`、`apply_patch`、`run_tests`、`git_diff`——访问当前仓库，而不是获得原始 shell 访问权限。你始终停留在单一的终端工作流中；提供商保留其真实界面。
+`ai-browser-bridge` 把这两个界面连接起来。它复用已经登录的 Chrome 或 Edge 配置文件，
+驱动提供商真实的网页界面，并只向网页 AI 提供五个经过校验的仓库工具：`grep_code`、
+`read_file`、`apply_patch`、`run_tests` 和 `git_diff`。因此你可以继续使用网页订阅中的模型、
+登录状态和会话历史，同时把本地访问严格限制在指定仓库内。
+
+本地工具有两种接入方式。`bridge agent` 使用结构化文本循环，不需要网页端支持 MCP，
+也不需要 Cloudflare 隧道、模型 API 或本地模型；交互界面的 `/task` 则在提供商支持时使用
+MCP 连接器与隧道。两种方式都不会把原始 Shell 交给网页 AI。
 
 ## 功能
 
 - **九个提供商，一个命令** — ChatGPT、Gemini、Claude、DeepSeek、Grok、Perplexity、Duck.ai、Arena 与 Google Flow。使用 `--provider` 选择一个，或并行询问多个。
+- **把网页订阅变成本地智能体** — `bridge agent` 可以让已登录的网页 AI 检查和修改指定仓库，无需另外购买模型 API。
 - **面向智能体** — `bridge ask … --json` 提供稳定的非交互接口，`bridge serve` 则暴露出站 MCP 工具。
 - **通过 MCP 的沙箱化本地工具** — 每个文件操作都针对所选仓库根目录进行校验；没有任意 shell，仅允许白名单内的测试命令。
 - **浏览器操作即命令** — `/resume`、`/new`、`/model`、`/rewind`、`/stop`、`/context`、`/diff`、`/compact` 等。
@@ -65,7 +73,7 @@ ChatGPT 在浏览器中表现最佳——真实的账户状态、模型选择器
 
 **前置条件**
 
-- **macOS** — Chrome 从 `/Applications/Google Chrome.app` 启动，剪贴板/进程辅助使用 `pbcopy`/`lsof`。
+- **macOS 或 Windows** — macOS 使用 Google Chrome，Windows 使用 Microsoft Edge；二者都通过 Chromium CDP 连接。
 - **Node.js ≥ 22** 与 **pnpm**（仓库锁定 `pnpm@10.14.0`）。
 - **Google Chrome 或 Chrome for Testing** — bridge 复用 `~/.ai-browser-bridge/chrome-profile` 中的全局共享配置文件。
 - **`cloudflared`** *（可选）* — ChatGPT、Claude 或 Grok 调用本地工具时需要。没有它 TUI 仍可运行。安装：`brew install cloudflared`。
@@ -79,10 +87,10 @@ pnpm install
 pnpm build
 ```
 
-**启动 Chrome，然后运行**
+**启动 bridge 浏览器，然后运行**
 
 ```bash
-# 打开 bridge 的共享 Chrome 配置文件；如有需要请登录
+# macOS 打开 Chrome，Windows 打开 Edge；首次使用请在这个窗口中登录
 node dist/bridge.js chrome start
 
 # 针对你希望 ChatGPT 操作的仓库启动终端界面
@@ -90,6 +98,54 @@ node dist/bridge.js --repo /path/to/your/project
 ```
 
 想要一个全局 `bridge` 命令？构建后运行 `pnpm link --global`，然后使用 `bridge`、`bridge chrome start`、`bridge ask "…"` 等。
+
+直接运行 `bridge` 会先打开终端启动面板。可以用方向键选择网页 AI 编程任务或普通会话、
+Provider、权限和是否新建会话，并直接填写仓库路径与任务。确认后这些设置会保存到目标仓库的
+`.bridge/config.json`，以后不必反复输入 `--repo` 和 `--permissions`。命令行参数仍保留给脚本和
+自动化使用。首次使用先运行一次 `bridge chrome start`，并保持这个共享浏览器开启；启动面板
+只会复用它，不会再建立一次临时连接。
+
+## 让网页 AI 读写本地仓库
+
+先启动 bridge 管理的浏览器并登录。浏览器窗口需要保持打开：
+
+```powershell
+node dist/bridge.js chrome start --provider chatgpt
+```
+
+建议先用默认的只读模式确认目标仓库：
+
+```powershell
+node dist/bridge.js agent "读取 package.json，并说明项目使用了哪些脚本" `
+  --provider chatgpt --repo E:\path\to\project
+```
+
+任务确实需要改文件时，再显式开启写入和白名单测试权限：
+
+```powershell
+node dist/bridge.js agent "修复失败的测试，检查 diff 后说明改动" `
+  --provider chatgpt --repo E:\path\to\project --permissions auto
+```
+
+`bridge agent` 会让网页 AI 每轮返回一个结构化工具请求，Bridge 校验后在本地执行，再把
+结果送回同一个网页会话。终端会显示当前轮次、等待网页回复和正在执行的工具；单轮默认
+等待 90 秒，按 `Ctrl+C` 可以随时终止。它不会要求网页端安装 MCP 连接器，也不会安装另一个模型。
+
+| 参数 | 用途 |
+|------|------|
+| `--provider <名称>` | 选择 `chatgpt`、`gemini`、`claude`、`deepseek`、`grok`、`perplexity`、`duck` 或 `arena`。 |
+| `--repo <路径>` | 指定工具唯一可以访问的仓库。 |
+| `--permissions read-only` | 只允许搜索、读取和查看 diff；这是默认值。 |
+| `--permissions auto` | 额外允许经过校验的补丁和白名单测试。 |
+| `--fresh` | 为本次任务新建网页会话。 |
+| `--conversation <ID或URL>` | 连接并继续某个已有网页会话。 |
+| `--max-turns <数量>` | 修改默认的 12 轮上限。 |
+| `--json` | 输出便于程序读取的完成结果。 |
+
+如果提示找不到输入框，先确认登录的是 bridge 打开的共享配置文件，而不是日常浏览器的
+另一个配置文件。登录正常时仍失败，通常意味着该提供商更新了网页结构，需要调整对应
+适配器的选择器。目前 ChatGPT 的真实读写闭环已经验证通过；其他聊天提供商复用同一协议，
+但各自网页适配器仍需分别验证。
 
 ## 智能体与提供商
 

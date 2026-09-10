@@ -4,7 +4,7 @@
 
 # ai-browser-bridge
 
-> Drive a real ChatGPT or Gemini browser conversation from your terminal, and give ChatGPT a narrow, sandboxed set of local repo tools over MCP — without ever handing it a shell.
+> Turn your signed-in ChatGPT and other web AI Conversations into sandboxed local coding agents through Chrome or Edge — no model API or raw shell required.
 
 **English** · [עברית](README.he.md) · [Español](README.es.md) · [中文](README.zh.md)
 
@@ -20,11 +20,20 @@
 
 ChatGPT is at its best in the browser — real account state, the model picker, message editing, regeneration, and conversation history all intact. Coding is at its best in the terminal, where files, tests, diffs, and patches are inspected and changed directly.
 
-`ai-browser-bridge` connects those two surfaces. A terminal prompt drives your existing ChatGPT or Gemini browser session, and ChatGPT can reach into the current repo through a small set of **validated MCP tools** — `grep`, `read`, `apply_patch`, `run_tests`, `git_diff` — instead of raw shell access. You stay in one terminal workflow; the provider keeps its real UI.
+`ai-browser-bridge` connects those two surfaces. It reuses a signed-in Chrome or Edge profile,
+drives the Provider's real web UI, and gives the web AI a narrow set of validated repository Tools:
+`grep_code`, `read_file`, `apply_patch`, `run_tests`, and `git_diff`. You keep the capabilities and
+Conversation history of your web subscription while local access remains inside the selected repo.
+
+There are two local-Tool paths. `bridge agent` works through a structured text loop and does not
+require a Provider MCP connector, Tunnel, model API, or local model. The interactive `/task` path
+uses a Provider MCP connector and Cloudflare Tunnel where the Provider supports one. Neither path
+hands the web AI a raw shell.
 
 ## Features
 
 - **Terminal-driven ChatGPT** — send prompts and stream replies without leaving the shell; the real browser conversation stays the source of truth.
+- **Web subscription to local agent** — `bridge agent` lets a signed-in web AI inspect and patch a selected repo without purchasing a separate model API.
 - **Nine providers, one command** — `chatgpt`, `gemini`, `claude`, `deepseek`, `grok`, `perplexity`, `duck` ([Duck.ai](https://duck.ai/chat)), `arena` ([Arena](https://arena.ai/code/direct) — Direct/Battle/Agent/Side-by-Side + model picker), plus `flow` (Google's Veo video studio — a generation surface, not a chat). Pick one with `--provider`, or **fan out** across several (`--provider claude,deepseek,duck`) and get every reply keyed by provider in one call.
 - **Built for agents** — a stable non-interactive `bridge ask … --json` contract (never hangs in a pipe) plus an outbound MCP `ask` tool, so any agent can drive a web chat.
 - **Sandboxed local tools over MCP** — every file operation is validated against the selected repo root; no arbitrary shell, allowlisted test commands only.
@@ -80,7 +89,7 @@ pnpm install
 pnpm build
 ```
 
-**Start Chrome, then run (ChatGPT — default)**
+**Start the bridge browser, then run (ChatGPT — default)**
 
 ```bash
 node dist/bridge.js chrome start
@@ -95,6 +104,13 @@ node dist/bridge.js --provider gemini --repo /path/to/your/project
 ```
 
 Prefer a global `bridge` command? Run `pnpm link --global` after building, then use `bridge`, `bridge chrome start`, `bridge ask "…"`, etc.
+
+Running `bridge` with no subcommand opens a terminal launch panel. Use it to select Agent or
+Conversation mode, the Target repo, Provider, permission mode, and whether to start a fresh
+Conversation. The selection is saved to the Target repo's `.bridge/config.json`, so interactive
+runs do not require repeated `--repo` or `--permissions` flags. CLI options remain available for
+scripts and automation. Start the shared bridge browser once with `bridge chrome start` and leave
+it open; the panel reuses that running browser without creating a second CDP connection.
 
 ### Browser profile policy
 
@@ -120,6 +136,53 @@ The macOS app override changes only which Chrome build is launched. On Windows, 
 node dist/bridge.js ask "summarize @src/core/engine.ts" --repo /path/to/project
 node dist/bridge.js ask "hello" --provider gemini --repo /path/to/project
 ```
+
+### Use a web AI as a local coding agent
+
+First launch the bridge-managed browser and sign in once. On macOS this opens Chrome; on Windows
+it opens Edge. Keep that browser window open.
+
+```bash
+node dist/bridge.js chrome start --provider chatgpt
+```
+
+Start with read-only access:
+
+```bash
+node dist/bridge.js agent "inspect package.json and summarize the scripts" \
+  --provider chatgpt --repo /path/to/project
+```
+
+Allow validated patches and allowlisted test commands only when the task needs to change files:
+
+```bash
+node dist/bridge.js agent "fix the failing browser runtime test" \
+  --provider chatgpt --repo /path/to/project --permissions auto
+```
+
+`bridge agent` keeps reasoning in the selected web Conversation. The Provider returns one JSON
+tool request per turn; the Bridge validates it and reuses the existing `grep_code`, `read_file`,
+`apply_patch`, `run_tests`, and `git_diff` handlers locally. It defaults to `read-only`; write and
+test tools require `--permissions auto`. The loop never exposes a raw shell, rejects paths outside
+the Target repo, and stops after 12 turns unless `--max-turns` is set.
+
+Useful options:
+
+| Option | Purpose |
+|--------|---------|
+| `--provider <name>` | Select `chatgpt`, `gemini`, `claude`, `deepseek`, `grok`, `perplexity`, `duck`, or `arena`. |
+| `--repo <path>` | Set the only repository the Tools may access. |
+| `--permissions read-only` | Permit inspection only; this is the default. |
+| `--permissions auto` | Also permit validated patches and allowlisted tests. |
+| `--fresh` | Start a new web Conversation for the task. |
+| `--conversation <idOrUrl>` | Continue a specific existing Conversation. |
+| `--max-turns <number>` | Change the default 12-turn limit. |
+| `--json` | Print a machine-readable completion result. |
+
+Provider web pages change over time. If a Provider cannot find its composer, confirm that the
+bridge-managed profile is signed in first; if it is, its selectors may need updating. ChatGPT is
+the currently verified read/write path, while the same protocol is available to the other chat
+Providers through their adapters.
 
 ## Usage
 

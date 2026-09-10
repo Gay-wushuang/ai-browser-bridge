@@ -2,6 +2,7 @@ export { effectSchemaToMcpShape, type McpZodShape } from "./mcpEffectAdapter.ts"
 export {
   downloadAllAttachmentsTool,
   downloadAttachmentTool,
+  executeRepositoryTool,
   extractPatchPaths,
   isAllowedTestCommand,
   isSseEndpointPath,

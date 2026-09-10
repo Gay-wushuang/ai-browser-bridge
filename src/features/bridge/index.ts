@@ -31,3 +31,10 @@ export {
   fanoutFailed,
   runFanoutTasks,
 } from "./fanoutPool.ts";
+export { loadConfig, saveConfig } from "./loadConfig.ts";
+export {
+  parseWebToolReply,
+  runWebToolAgent,
+  type WebToolAgentProgress,
+  type WebToolAgentResult,
+} from "./webToolAgent.ts";

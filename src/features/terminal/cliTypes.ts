@@ -30,6 +30,11 @@ export type AskOptions = CliOptions &
     readonly maxReplyChars?: string;
   };
 
+export type AgentOptions = AskOptions & {
+  readonly permissions?: string;
+  readonly maxTurns?: string;
+};
+
 export type ServeOptions = CliOptions & {
   readonly timeout?: string;
 };
