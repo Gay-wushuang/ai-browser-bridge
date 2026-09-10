@@ -75,20 +75,21 @@ const browserStatusFor = (input: {
       ...input,
       canAttach: false,
       state: "chrome-running-without-debug",
-      message: `Chrome is running without debug port ${input.port}. Run \`bridge chrome start\` to launch or reuse the shared bridge profile on the debug port.`,
+      message: `The browser is running without debug port ${input.port}. Run \`bridge chrome start\` to launch or reuse the shared bridge profile on the debug port.`,
     };
   }
   return {
     ...input,
     canAttach: false,
     state: "chrome-not-running",
-    message: "Chrome is not running. Start the shared bridge profile with `bridge chrome start`.",
+    message:
+      "The browser is not running. Start the shared bridge profile with `bridge chrome start`.",
   };
 };
 
 const readyMessage = (port: number, userDataDir: string | null): string => {
   if (userDataDir === null) {
-    return `Chrome debug port ${port} is ready.`;
+    return `Browser debug port ${port} is ready.`;
   }
-  return `Chrome debug port ${port} is ready. Profile: ${userDataDir}.`;
+  return `Browser debug port ${port} is ready. Profile: ${userDataDir}.`;
 };

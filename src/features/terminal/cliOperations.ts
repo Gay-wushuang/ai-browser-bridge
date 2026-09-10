@@ -23,8 +23,10 @@ import {
   BrowserSession,
   bridgeChromeProfileRoot,
   inventoryChromeCache,
+  isDebugPortListening,
   pruneChromeCache,
   readBrowserStatus,
+  terminateChromeOnDebugPort,
 } from "@/features/browser";
 import type { ConversationSearchResult } from "@/features/conversationCatalog";
 import type {
@@ -708,22 +710,41 @@ const assertImagePath = (path: string): void => {
   }
 };
 
-const copyTextToClipboard = async (text: string): Promise<void> => {
-  await new Promise<void>((...args: [() => void, (reason?: unknown) => void]) => {
-    runPbcopy({ text, resolve: args[0], reject: args[1] });
-  });
+const clipboardProcessCommand = (
+  platform: NodeJS.Platform,
+): { readonly command: string; readonly args: readonly string[] } => {
+  if (platform === "darwin") return { command: "pbcopy", args: [] };
+  if (platform === "win32") {
+    return {
+      command: "powershell.exe",
+      args: [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "[Console]::InputEncoding = [Text.UTF8Encoding]::new($false); Set-Clipboard -Value ([Console]::In.ReadToEnd())",
+      ],
+    };
+  }
+  throw new Error(`Clipboard export is unsupported on platform: ${platform}`);
 };
 
-const runPbcopy = (input: {
+const runClipboardProcess = (input: {
   text: string;
   resolve: () => void;
   reject: (reason?: unknown) => void;
 }): void => {
-  const child = execFile("pbcopy", (error) => {
+  const clipboardCommand = clipboardProcessCommand(process.platform);
+  const child = execFile(clipboardCommand.command, clipboardCommand.args, (error) => {
     if (error) input.reject(error);
     else input.resolve();
   });
   child.stdin?.end(input.text);
+};
+
+const copyTextToClipboard = async (text: string): Promise<void> => {
+  await new Promise<void>((...args: [() => void, (reason?: unknown) => void]) => {
+    runClipboardProcess({ text, resolve: args[0], reject: args[1] });
+  });
 };
 
 type CaptureUrlScreenshotsParams = {
@@ -1728,29 +1749,6 @@ const assertChromeClosedForCachePrune = async (): Promise<void> => {
   const status = await readBrowserStatus();
   if (!status.chromeRunning) return;
   fail("Quit Chrome before pruning generated cache from the shared bridge profile.");
-};
-
-const killDebugPort = (port: number): Promise<boolean> => {
-  return new Promise((resolveKill) => {
-    execFile("lsof", ["-ti", `tcp:${port}`], (...args: [Error | null, string]) => {
-      resolveKill(killPidsFromStdout(args[1]));
-    });
-  });
-};
-
-const killPidsFromStdout = (stdout: string): boolean => {
-  const pids = stdout.trim().split(/\s+/).filter(Boolean);
-  if (pids.length === 0) return false;
-  for (const pid of pids) killPidBestEffort(pid);
-  return true;
-};
-
-const killPidBestEffort = (pid: string): void => {
-  try {
-    process.kill(Number(pid));
-  } catch {
-    // process already gone
-  }
 };
 
 const assertSignedIn = async (
@@ -3335,15 +3333,16 @@ const launchChromeBrowser = async (options: ChromeStartOptions): Promise<Browser
 
 const writeChromeStartInstructions = (displayName: string): void => {
   process.stderr.write(
-    `Chrome is open for ${displayName} with the bridge debug port.
-This uses the shared bridge Chrome profile, so sign in once in this window and every repo can reuse it.
-Leave this Chrome window open; \`bridge ask\` will reconnect to it.
+    `The browser is open for ${displayName} with the bridge debug port.
+This uses the shared bridge profile, so sign in once in this window and every repo can reuse it.
+Leave this browser window open; \`bridge ask\` will reconnect to it.
 `,
   );
 };
 
 export const runStop = async (): Promise<void> => {
-  const killed = await killDebugPort(BRIDGE_DEBUG_PORT);
+  const killed = await isDebugPortListening({ port: BRIDGE_DEBUG_PORT });
+  if (killed) await terminateChromeOnDebugPort(BRIDGE_DEBUG_PORT);
   process.stderr.write(
     killed ? "Closed the bridge browser.\n" : "No bridge browser was running.\n",
   );

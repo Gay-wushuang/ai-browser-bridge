@@ -278,6 +278,19 @@ describe("attachment extraction", () => {
     expect(manifest.counters?.assistant.image).toBe(2);
     expect(manifest.attachments.map((attachment) => attachment.id)).toEqual(["image-1", "image-2"]);
   });
+
+  it("stores temporary conversation ids containing Windows filename characters", async () => {
+    const conversationId = "WEB:9b96c0a0-a1e2-4635-9126-dd5e0e4605c9";
+    await extractAssistantContent(
+      pageWithLast(assistantMessage([el("img", { src: "https://example.test/result.png" })])),
+      { conversationId, ...manifestOptions() },
+    );
+
+    const manifest = await loadManifest(conversationId, manifestOptions());
+
+    expect(manifest.conversationId).toBe(conversationId);
+    expect(manifest.attachments).toHaveLength(1);
+  });
 });
 
 const manifestOptions = (): { manifestRoot: string } => ({

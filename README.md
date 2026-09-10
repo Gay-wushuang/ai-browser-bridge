@@ -66,9 +66,9 @@ Four layers, each with one job:
 
 **Prerequisites**
 
-- **macOS** — Chrome is launched with the macOS `open` command, and clipboard/process helpers use `pbcopy`/`lsof`.
+- **macOS or Windows** — macOS launches Google Chrome; Windows launches Microsoft Edge. Both connect through the same Chromium CDP boundary.
 - **Node.js ≥ 22** and **pnpm** (the repo pins `pnpm@10.14.0`).
-- **Google Chrome or Chrome for Testing** — the bridge drives one shared bridge profile through a debug port. Sign in once in that bridge-launched window; every repo reuses it.
+- **Google Chrome on macOS or Microsoft Edge on Windows** — the bridge drives one shared bridge profile through a debug port. Sign in once in that bridge-launched window; every repo reuses it.
 - **`cloudflared`** *(optional; ChatGPT, Claude, Grok)* — only needed for those providers to call local MCP tools. Without it the TUI still runs. Install with `brew install cloudflared`.
 
 **Install & build**
@@ -112,7 +112,7 @@ For release and automation work, Chrome's team recommends [Chrome for Testing](h
 AI_BROWSER_BRIDGE_CHROME_APP="Google Chrome for Testing" bridge chrome start
 ```
 
-The app override changes only which Chrome build is launched. The profile remains `~/.ai-browser-bridge/chrome-profile`; do not add per-repo Chrome profiles. See Chrome's [remote-debugging profile change](https://developer.chrome.com/blog/remote-debugging-port) for the upstream reason.
+The macOS app override changes only which Chrome build is launched. On Windows, set `AI_BROWSER_BRIDGE_EDGE_EXECUTABLE` to override Edge's executable path. The profile remains `~/.ai-browser-bridge/chrome-profile`; do not add per-repo browser profiles. See Chrome's [remote-debugging profile change](https://developer.chrome.com/blog/remote-debugging-port) for the upstream reason.
 
 **One-shot, non-interactive**
 
@@ -374,7 +374,7 @@ Flow requires a **Google AI Pro/Ultra** plan. Because Veo renders take minutes, 
 
 ## Limitations
 
-- **macOS-only** today (`open`, `pbcopy`, and `lsof` helpers).
+- **macOS and Windows** are supported through Chrome and Edge respectively.
 - ChatGPT and Gemini browser selectors can break when the web UI changes; fixes are localized to the browser layer.
 - Context usage is an **estimate** — the browser does not expose exact server-side token counts.
 - The Cloudflare Tunnel requires `cloudflared` installed.

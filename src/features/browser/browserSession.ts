@@ -1,31 +1,32 @@
-import { execFile, spawn } from "node:child_process";
 import { mkdirSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
-import { promisify } from "node:util";
 import type { Browser, BrowserContext, Page, Response } from "playwright";
 import { chromium } from "playwright";
 import type { BridgeProviderId } from "@/config";
 import type { Conversation } from "@/features/domain";
 import { type BrowserProvider, providerFor } from "@/features/providers";
-import { bridgeChromeProfileRoot, chromeAppName } from "./browserProfile.ts";
+import { bridgeChromeProfileRoot } from "./browserProfile.ts";
+import { browserRuntime } from "./browserRuntime.ts";
 
 export const BRIDGE_DEBUG_PORT = 9222;
 
 // Matches a Chrome command line arg like --user-data-dir=/Users/me/Profile.
-const USER_DATA_DIR_ARG = /--user-data-dir=(?<userDataDir>[^\s]+)/;
+const USER_DATA_DIR_ARG =
+  /--user-data-dir=(?:"(?<quotedUserDataDir>[^"]+)"|(?<unquotedUserDataDir>[^\s]+))/u;
 
 const cdpUrlForPort = (port: number): string => `http://127.0.0.1:${port}`;
-const execFileAsync = promisify(execFile);
-
 export const getUserDataDirOnDebugPort = async (
   port: number = BRIDGE_DEBUG_PORT,
 ): Promise<string | null> => {
   try {
-    const { stdout } = await execFileAsync("ps", ["ax", "-o", "command="]);
+    const processCommandLines = await browserRuntime().processCommandLines();
     const remoteDebuggingPortArg = `--remote-debugging-port=${port}`;
-    for (const line of stdout.split("\n")) {
+    for (const line of processCommandLines) {
       if (!line.includes(remoteDebuggingPortArg)) continue;
-      const userDataDir = USER_DATA_DIR_ARG.exec(line)?.groups?.userDataDir;
+      const userDataDirMatch = USER_DATA_DIR_ARG.exec(line);
+      const quotedUserDataDir = userDataDirMatch?.groups?.quotedUserDataDir;
+      if (quotedUserDataDir !== undefined) return quotedUserDataDir;
+      const userDataDir = userDataDirMatch?.groups?.unquotedUserDataDir;
       if (userDataDir === undefined) continue;
       return userDataDir;
     }
@@ -58,7 +59,7 @@ export const terminateChromeOnDebugPort = async (
   port: number = BRIDGE_DEBUG_PORT,
 ): Promise<void> => {
   try {
-    await execFileAsync("pkill", ["-f", `--remote-debugging-port=${port}`]);
+    await browserRuntime().terminateOnDebugPort(port);
   } catch {
     // No matching Chrome process on this debug port.
   }
@@ -87,19 +88,7 @@ export const isDebugPortListening = async (
   }
 };
 
-export const isChromeProcessRunning = (
-  input: { readonly appName?: string } = {},
-): Promise<boolean> => {
-  let appName = chromeAppName();
-  if (input.appName !== undefined) {
-    appName = input.appName;
-  }
-  return new Promise((resolveRunning) => {
-    execFile("pgrep", ["-f", `${appName}.app/Contents/MacOS`], (error, stdout) => {
-      resolveRunning(error === null && stdout.trim().length > 0);
-    });
-  });
-};
+export const isChromeProcessRunning = (): Promise<boolean> => browserRuntime().isProcessRunning();
 
 const sleep = (ms: number): Promise<void> => {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
@@ -150,20 +139,12 @@ const spawnChrome = (
   port: number = BRIDGE_DEBUG_PORT,
 ): void => {
   mkdirSync(profileRoot, { recursive: true });
-  const child = spawn(
-    "open",
-    ["-na", chromeAppName(), "--args", ...chromeLaunchArgs(defaultUrl, profileRoot, port)],
-    {
-      detached: true,
-      stdio: "ignore",
-    },
-  );
-  child.unref();
+  browserRuntime().launch(chromeLaunchArgs(defaultUrl, profileRoot, port));
 };
 
 const attachOnlyError = (port: number): BrowserAttachError => {
   return new BrowserAttachError(
-    `No Chrome listening on debug port ${port}. Run \`bridge chrome start\` before using browser automation.`,
+    `No browser listening on debug port ${port}. Run \`bridge chrome start\` before using browser automation.`,
   );
 };
 
@@ -321,7 +302,9 @@ const connectOnceOverCdp = async (input: {
     if (found) {
       input.state.context = found.context;
       input.state.page = found.page;
-      console.error(`  Connected to running Chrome, found ${input.provider.origin} tab.`);
+      console.error(
+        `  Connected to running ${browserRuntime().displayName}, found ${input.provider.origin} tab.`,
+      );
     } else {
       const [firstContext] = input.state.browser.contexts();
       if (!firstContext) {
@@ -331,7 +314,7 @@ const connectOnceOverCdp = async (input: {
       input.state.context = firstContext;
       input.state.page = await firstContext.newPage();
       console.error(
-        `  Connected to running Chrome, no ${input.provider.origin} tab — opening one.`,
+        `  Connected to running ${browserRuntime().displayName}, no ${input.provider.origin} tab — opening one.`,
       );
     }
     return Boolean(input.state.page);
@@ -432,17 +415,19 @@ export class BrowserSession {
       const connected = await this.connectExisting({ attempts: 20, intervalMs: 500 });
       if (connected) return this.getPage();
       throw new BrowserAttachError(
-        `Chrome debug port ${this.debugPort} is open but the bridge could not attach. Run \`bridge status\` to inspect the Chrome owner.`,
+        `Browser debug port ${this.debugPort} is open but the bridge could not attach. Run \`bridge status\` to inspect its owner.`,
       );
     }
     return await this.runSpawnAndConnect();
   }
 
   private async runSpawnAndConnect(): Promise<Page> {
-    console.error("  Launching Chrome with bridge debug port using the shared bridge profile.");
+    console.error(
+      `  Launching ${browserRuntime().displayName} with the bridge debug port using the shared bridge profile.`,
+    );
     spawnChrome(this.provider.defaultUrl, this.profileRoot, this.debugPort);
     this.spawnedNew.value = true;
-    console.error("  Waiting for Chrome debug port...");
+    console.error("  Waiting for browser debug port...");
     await waitForDebugPort(this.debugPort);
     const connected = await this.connectExisting({ attempts: 20, intervalMs: 500 });
     if (!connected || !this.page) throw spawnReadyError(this.debugPort);

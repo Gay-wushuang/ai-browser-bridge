@@ -16,18 +16,19 @@ import {
 
 describe("repo-local path resolution", () => {
   it("keeps repository paths inside the repository root", () => {
-    expect(repositoryPath("/my/repo", "src/index.ts")).toBe("/my/repo/src/index.ts");
-    expect(repositoryPath("/my/repo", ".")).toBe("/my/repo");
-    expect(() => repositoryPath("/my/repo", "../../etc/passwd")).toThrow("Path escapes repo root");
+    const repo = join(tmpdir(), "my-repo");
+    expect(repositoryPath(repo, join("src", "index.ts"))).toBe(join(repo, "src", "index.ts"));
+    expect(repositoryPath(repo, ".")).toBe(repo);
+    expect(() => repositoryPath(repo, join("..", "outside.txt"))).toThrow("Path escapes repo root");
   });
 
   it("scopes every state location under <repo>/.bridge", () => {
-    const repo = "/tmp/example-repo";
-    expect(bridgeDir(repo)).toBe("/tmp/example-repo/.bridge");
-    expect(configPath(repo)).toBe("/tmp/example-repo/.bridge/config.json");
-    expect(logsDir(repo)).toBe("/tmp/example-repo/.bridge/logs");
-    expect(sessionsDir(repo)).toBe("/tmp/example-repo/.bridge/sessions");
-    expect(downloadsDir(repo)).toBe("/tmp/example-repo/.bridge/downloads");
+    const repo = join(tmpdir(), "example-repo");
+    expect(bridgeDir(repo)).toBe(join(repo, ".bridge"));
+    expect(configPath(repo)).toBe(join(repo, ".bridge", "config.json"));
+    expect(logsDir(repo)).toBe(join(repo, ".bridge", "logs"));
+    expect(sessionsDir(repo)).toBe(join(repo, ".bridge", "sessions"));
+    expect(downloadsDir(repo)).toBe(join(repo, ".bridge", "downloads"));
   });
 
   it("resolves a nested launch directory to its Git working-tree root", async () => {

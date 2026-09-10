@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { BRIDGE_DIR_NAME, REPO_DIR_NAME } from "@/config";
 
 export const HOOKS_FILE = "hooks.json";
@@ -24,9 +24,9 @@ export const repositoryRoot = (startPath = process.cwd()): string => {
 export const repositoryPath = (repoRoot: string, path: string): string => {
   const absolutePath = resolve(repoRoot, path);
   const absoluteRoot = resolve(repoRoot);
-  if (absolutePath === absoluteRoot || absolutePath.startsWith(`${absoluteRoot}/`)) {
-    return absolutePath;
-  }
+  const pathFromRoot = relative(absoluteRoot, absolutePath);
+  if (pathFromRoot.length === 0) return absolutePath;
+  if (!pathFromRoot.startsWith("..") && !isAbsolute(pathFromRoot)) return absolutePath;
   throw new Error(`Path escapes repo root: ${path}`);
 };
 

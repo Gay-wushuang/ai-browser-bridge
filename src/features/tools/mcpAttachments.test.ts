@@ -56,42 +56,45 @@ describe("MCP attachment tools", () => {
   });
 
   it("downloads a single attachment", async () => {
-    downloadAttachmentMock.mockResolvedValue({ path: "/tmp/report.csv", bytes: 42 });
+    const reportPath = path.join(tempDir, "report.csv");
+    downloadAttachmentMock.mockResolvedValue({ path: reportPath, bytes: 42 });
 
     const toolResult = await downloadAttachmentTool.handler({
       _page: page("conv-1"),
-      _repoRoot: "/repo",
+      _repoRoot: tempDir,
       id: "file-1",
     });
 
     expect(downloadAttachmentMock).toHaveBeenCalledWith(expect.any(Object), "conv-1", "file-1", {
-      repoRoot: "/repo",
-      manifestRoot: "/repo/.bridge/downloads",
+      repoRoot: tempDir,
+      manifestRoot: path.join(tempDir, ".bridge", "downloads"),
     });
-    expect(JSON.parse(toolResult.output)).toEqual({ path: "/tmp/report.csv", bytes: 42 });
+    expect(JSON.parse(toolResult.output)).toEqual({ path: reportPath, bytes: 42 });
   });
 
   it("downloads all selected attachments", async () => {
+    const reportPath = path.join(tempDir, "report.csv");
+    const outputDirectory = path.join(tempDir, "out");
     downloadAllMock.mockResolvedValue([
-      { id: "file-1", path: "/tmp/report.csv", bytes: 42 },
+      { id: "file-1", path: reportPath, bytes: 42 },
       { id: "image-1", path: "", bytes: 0, error: "missing" },
     ]);
 
     const toolResult = await downloadAllAttachmentsTool.handler({
       _page: page("conv-1"),
-      _repoRoot: "/repo",
-      outDir: "/tmp/out",
+      _repoRoot: tempDir,
+      outDir: outputDirectory,
       ids: ["file-1", "image-1"],
     });
 
     expect(downloadAllMock).toHaveBeenCalledWith(expect.any(Object), "conv-1", {
-      repoRoot: "/repo",
-      manifestRoot: "/repo/.bridge/downloads",
-      outDir: "/tmp/out",
+      repoRoot: tempDir,
+      manifestRoot: path.join(tempDir, ".bridge", "downloads"),
+      outDir: outputDirectory,
       ids: ["file-1", "image-1"],
     });
     expect(JSON.parse(toolResult.output)).toEqual([
-      { id: "file-1", path: "/tmp/report.csv", bytes: 42 },
+      { id: "file-1", path: reportPath, bytes: 42 },
       { id: "image-1", path: "", bytes: 0, error: "missing" },
     ]);
   });

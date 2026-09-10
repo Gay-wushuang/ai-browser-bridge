@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   BrowserAttachError,
@@ -46,7 +47,7 @@ describe("browser session", () => {
   });
 
   it("keeps the bridge Chrome profile global and not repo-local", () => {
-    expect(bridgeChromeProfileRoot()).toContain(".ai-browser-bridge/chrome-profile");
+    expect(bridgeChromeProfileRoot()).toContain(join(".ai-browser-bridge", "chrome-profile"));
     expect(bridgeChromeProfileRoot()).not.toContain(".bridge");
   });
 

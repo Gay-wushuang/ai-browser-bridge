@@ -9,6 +9,14 @@ export {
   isolatedProfilesRoot,
 } from "./browserProfile.ts";
 export {
+  type BrowserRuntime,
+  browserLaunch,
+  browserRuntime,
+  EDGE_EXECUTABLE_ENV,
+  edgeExecutableCandidates,
+  windowsEdgeExecutable,
+} from "./browserRuntime.ts";
+export {
   type BrowserStatus,
   BrowserStatusSchema,
   type CacheInventory,

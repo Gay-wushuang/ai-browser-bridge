@@ -1466,11 +1466,30 @@ const defaultAttachmentManifestRoot = (): string => {
   return path.join(homedir(), BRIDGE_DIR_NAME, "attachment-manifests");
 };
 
+const SAFE_MANIFEST_DIRECTORY_NAME = /^[a-z0-9._-]+$/iu;
+const WINDOWS_RESERVED_DIRECTORY_NAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu;
+
+const manifestDirectoryName = (conversationId: string): string => {
+  if (
+    conversationId !== "." &&
+    conversationId !== ".." &&
+    SAFE_MANIFEST_DIRECTORY_NAME.test(conversationId) &&
+    !WINDOWS_RESERVED_DIRECTORY_NAME.test(conversationId)
+  ) {
+    return conversationId;
+  }
+  return `encoded-${Buffer.from(conversationId, "utf8").toString("base64url")}`;
+};
+
 const manifestPath = (conversationId: string, options: ManifestStoreOptions = {}): string => {
   const downloadsRoot = options.manifestRoot
     ? path.resolve(options.manifestRoot)
     : defaultAttachmentManifestRoot();
-  const filePath = path.resolve(downloadsRoot, conversationId, "manifest.json");
+  const filePath = path.resolve(
+    downloadsRoot,
+    manifestDirectoryName(conversationId),
+    "manifest.json",
+  );
   if (!filePath.startsWith(`${downloadsRoot}${path.sep}`)) {
     throw new Error(`Invalid conversation id for attachment manifest: ${conversationId}`);
   }
