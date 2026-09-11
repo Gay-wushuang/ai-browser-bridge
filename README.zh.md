@@ -97,6 +97,9 @@ node dist/bridge.js chrome start
 node dist/bridge.js --repo /path/to/your/project
 ```
 
+Windows 也可以直接双击仓库根目录的 `start-bridge.cmd`。它会切换到脚本所在目录、缺少依赖时
+执行安装、重新构建最新版，然后打开持续 Agent 工作台。Edge 的共享 bridge 窗口仍需保持登录。
+
 想要一个全局 `bridge` 命令？构建后运行 `pnpm link --global`，然后使用 `bridge`、`bridge chrome start`、`bridge ask "…"` 等。
 
 直接运行 `bridge` 会先打开终端启动面板。可以用方向键选择网页 AI 编程任务或普通会话、
@@ -104,6 +107,11 @@ Provider、权限和是否新建会话，并直接填写仓库路径与任务。
 `.bridge/config.json`，以后不必反复输入 `--repo` 和 `--permissions`。命令行参数仍保留给脚本和
 自动化使用。首次使用先运行一次 `bridge chrome start`，并保持这个共享浏览器开启；启动面板
 只会复用它，不会再建立一次临时连接。
+
+Agent 面板是持续会话：一项任务完成后不会退出程序，而是保留同一个网页会话和全部设置，
+显示上一轮结果并清空 Task 输入框，等待继续输入。`New Conversation: no` 时后续任务继承前文；
+选择 `yes` 才新建网页会话，按 `Esc` 才退出工作台。Repo 和 Task 文本支持左右移动光标、在中间
+插入、Backspace、Delete，以及 `Ctrl+A` 清空。
 
 ## 让网页 AI 读写本地仓库
 
@@ -146,6 +154,16 @@ node dist/bridge.js agent "修复失败的测试，检查 diff 后说明改动" 
 另一个配置文件。登录正常时仍失败，通常意味着该提供商更新了网页结构，需要调整对应
 适配器的选择器。目前 ChatGPT 的真实读写闭环已经验证通过；其他聊天提供商复用同一协议，
 但各自网页适配器仍需分别验证。
+
+### 权限边界
+
+`auto` 表示“目标仓库内自动执行”，不是整台电脑的无限权限。在目标仓库内，已知的读取、
+补丁（包括创建和删除文本文件）以及白名单测试工具可以自动执行。所有文件路径都会先经过
+规范化并校验；绝对路径、`..` 逃逸和指向目标仓库外的路径会被硬拒绝。
+
+Bridge 不提供原始 Shell。`run_tests` 使用参数数组直接启动固定的测试程序，工作目录固定为
+目标仓库。任何未来新增但尚未分类的进程工具，即使处于 `auto` 模式也会返回
+`process-review-required`，必须经过人工审查后才能专门实现；网页 AI 的文字不能代替用户批准。
 
 ## 智能体与提供商
 

@@ -58,12 +58,19 @@ describe("evaluateToolPermission", () => {
     });
   });
 
-  it("allows all known access kinds in auto mode", () => {
-    for (const toolName of ["read_file", "apply_patch", "run_tests", "spawn_process"]) {
+  it("allows known repository access kinds in auto mode", () => {
+    for (const toolName of ["read_file", "apply_patch", "run_tests"]) {
       expect(evaluateToolPermission(toolName, "auto")).toMatchObject({
         status: "allowed",
       });
     }
+  });
+
+  it("requires review for unclassified process tools even in auto mode", () => {
+    expect(evaluateToolPermission("spawn_process", "auto")).toMatchObject({
+      status: "needs-confirmation",
+      reason: "process-review-required",
+    });
   });
 });
 

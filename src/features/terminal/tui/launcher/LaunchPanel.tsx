@@ -16,6 +16,7 @@ export type LaunchSelection = {
 
 type LaunchPanelProps = {
   readonly initial: LaunchSelection;
+  readonly notice?: string;
   readonly onSelect: (selection: LaunchSelection) => void;
   readonly onCancel: () => void;
 };
@@ -200,6 +201,7 @@ export const LaunchPanel = (props: LaunchPanelProps) => {
         ai-browser-bridge launcher
       </Text>
       <Text dimColor>Use ↑/↓ or Tab to move, ←/→ to choose or move the text cursor.</Text>
+      {props.notice === undefined ? null : <Text color="green">Last task: {props.notice}</Text>}
       <Text> </Text>
       <Text color={rowColor(field === 0)}>
         {field === 0 ? "›" : " "} Mode: {selection.mode}

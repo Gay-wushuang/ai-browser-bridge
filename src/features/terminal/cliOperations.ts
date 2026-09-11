@@ -3490,11 +3490,13 @@ const initialLaunchSelection = async (
 
 const selectLaunchConfiguration = async (
   initial: LaunchSelection,
+  notice?: string,
 ): Promise<LaunchSelection | undefined> => {
   let selected: LaunchSelection | undefined;
   const app = render(
     React.createElement(LaunchPanel, {
       initial,
+      notice,
       onSelect: (selection: LaunchSelection) => {
         selected = selection;
       },
@@ -3516,37 +3518,79 @@ const saveLaunchSelection = async (selection: LaunchSelection): Promise<void> =>
   await saveConfig(config);
 };
 
-const runLaunchSelection = async (
+const runConversationSelection = async (
   selection: LaunchSelection,
   options: CliOptions & { browser?: boolean },
 ): Promise<void> => {
   await saveLaunchSelection(selection);
-  if (selection.mode === "conversation") {
-    await runTui({
-      ...options,
-      repo: selection.repoPath,
-      provider: selection.provider,
-    });
-    return;
-  }
-  const result = await executeAgentTask(selection.task, {
+  await runTui({
+    ...options,
     repo: selection.repoPath,
     provider: selection.provider,
-    permissions: selection.permissionMode,
-    fresh: selection.fresh,
   });
-  process.stdout.write(`\n${result.summary}\n\n`);
+};
+
+type AgentWorkspace = {
+  readonly key: string;
+  readonly setup: Awaited<ReturnType<typeof prepareAskRun>>;
+};
+
+const agentOptionsForSelection = (selection: LaunchSelection): AgentOptions => ({
+  repo: selection.repoPath,
+  provider: selection.provider,
+  permissions: selection.permissionMode,
+  fresh: selection.fresh,
+});
+
+const agentWorkspaceKey = (selection: LaunchSelection): string => {
+  return `${repositoryRoot(resolve(selection.repoPath))}\u0000${selection.provider}`;
+};
+
+const stopAgentWorkspace = async (workspace: AgentWorkspace | undefined): Promise<void> => {
+  if (workspace === undefined) return;
+  workspace.setup.removeSignalHandlers();
+  await workspace.setup.engine.shutdown({ closeBrowser: false });
+};
+
+const agentWorkspaceFor = async (
+  selection: LaunchSelection,
+  current: AgentWorkspace | undefined,
+): Promise<AgentWorkspace> => {
+  const key = agentWorkspaceKey(selection);
+  if (current !== undefined && current.key === key) return current;
+  await stopAgentWorkspace(current);
+  process.stderr.write("Connecting to the bridge browser...\n");
+  const setup = await prepareAskRun(agentOptionsForSelection(selection));
+  process.stderr.write("Browser connected and Login verified. Agent workspace is ready.\n");
+  return { key, setup };
 };
 
 export const runInteractiveCli = async (
   options: CliOptions & { browser?: boolean },
 ): Promise<void> => {
   let initial = await initialLaunchSelection(options);
+  let notice: string | undefined;
+  let workspace: AgentWorkspace | undefined;
   while (true) {
-    const selection = await selectLaunchConfiguration(initial);
-    if (selection === undefined) return;
-    await runLaunchSelection(selection, options);
-    if (selection.mode === "conversation") return;
+    const selection = await selectLaunchConfiguration(initial, notice);
+    if (selection === undefined) {
+      await stopAgentWorkspace(workspace);
+      process.exit(0);
+    }
+    if (selection.mode === "conversation") {
+      await stopAgentWorkspace(workspace);
+      await runConversationSelection(selection, options);
+      return;
+    }
+    await saveLaunchSelection(selection);
+    workspace = await agentWorkspaceFor(selection, workspace);
+    const result = await executeAgentTurn(
+      selection.task,
+      agentOptionsForSelection(selection),
+      workspace.setup,
+    );
+    notice = result.summary;
+    process.stdout.write(`\n${result.summary}\n\n`);
     initial = { ...selection, fresh: false, task: "" };
   }
 };
@@ -3578,32 +3622,40 @@ const agentTimeoutMs = (value: string | undefined): number => {
   return 90_000;
 };
 
-const executeAgentTask = async (
+const executeAgentTurn = async (
   task: string,
   options: AgentOptions,
+  setup: Awaited<ReturnType<typeof prepareAskRun>>,
 ): Promise<WebToolAgentResult> => {
   if (task.trim().length === 0)
     return fail('Provide a task (e.g. `bridge agent "inspect README"`).');
-  process.stderr.write("Connecting to the bridge browser...\n");
-  const setup = await prepareAskRun(options);
-  process.stderr.write("Browser connected and Login verified. Starting the Agent loop...\n");
   const permissionMode = agentPermissionMode(
     options.permissions,
     setup.engine.config.permissionMode,
   );
+  await applyAskPreflight({ engine: setup.engine, options });
+  return await runWebToolAgent({
+    engine: setup.engine,
+    task,
+    permissionMode,
+    maxTurns: agentMaxTurns(options.maxTurns),
+    timeoutMs: agentTimeoutMs(options.timeout),
+    onProgress: (message) => process.stderr.write(`${message}\n`),
+  });
+};
+
+const executeAgentTask = async (
+  task: string,
+  options: AgentOptions,
+): Promise<WebToolAgentResult> => {
+  process.stderr.write("Connecting to the bridge browser...\n");
+  const setup = await prepareAskRun(options);
+  process.stderr.write("Browser connected and Login verified. Starting the Agent loop...\n");
   try {
-    await applyAskPreflight({ engine: setup.engine, options });
-    return await runWebToolAgent({
-      engine: setup.engine,
-      task,
-      permissionMode,
-      maxTurns: agentMaxTurns(options.maxTurns),
-      timeoutMs: agentTimeoutMs(options.timeout),
-      onProgress: (message) => process.stderr.write(`${message}\n`),
-    });
+    return await executeAgentTurn(task, options, setup);
   } finally {
     setup.removeSignalHandlers();
-    await setup.engine.shutdown({ closeBrowser: true });
+    await setup.engine.shutdown({ closeBrowser: false });
   }
 };
 

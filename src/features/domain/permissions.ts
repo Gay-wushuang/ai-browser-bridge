@@ -3,8 +3,8 @@ import type { ToolResult } from "./types.ts";
 
 export const PERMISSION_MODES = ["read-only", "ask", "auto"] as const;
 
-const READ_TOOLS = new Set(["grep_code", "read_file", "git_diff"]);
-const WRITE_TOOLS = new Set(["apply_patch"]);
+const READ_TOOLS = new Set(["grep_code", "read_file", "git_diff", "chatgpt_list_attachments"]);
+const WRITE_TOOLS = new Set(["apply_patch", "chatgpt_download_attachment", "chatgpt_download_all"]);
 const TEST_TOOLS = new Set(["run_tests"]);
 
 export type PermissionMode = (typeof PERMISSION_MODES)[number];
@@ -50,7 +50,7 @@ export const evaluateToolPermission = (
   const mode = normalizePermissionMode(modeInput);
   const kind = toolPermissionKind(toolName);
 
-  if (kind === "read" || mode === "auto") {
+  if (kind === "read" || (mode === "auto" && (kind === "write" || kind === "test"))) {
     return {
       toolName,
       mode,
@@ -69,6 +69,17 @@ export const evaluateToolPermission = (
       status: "needs-confirmation",
       reason: "interactive-confirmation-unavailable",
       message: `Tool ${toolName} requires ${kind} access, but permission mode ask cannot continue because interactive confirmation is not implemented yet.`,
+    };
+  }
+
+  if (kind === "process" && mode === "auto") {
+    return {
+      toolName,
+      mode,
+      kind,
+      status: "needs-confirmation",
+      reason: "process-review-required",
+      message: `Tool ${toolName} starts an unclassified process and requires explicit human review.`,
     };
   }
 

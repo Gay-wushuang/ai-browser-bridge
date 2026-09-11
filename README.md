@@ -96,6 +96,10 @@ node dist/bridge.js chrome start
 node dist/bridge.js --repo /path/to/your/project
 ```
 
+On Windows, double-click `start-bridge.cmd` in the repository root. It changes to its own
+directory, installs missing dependencies, rebuilds the current source, and opens the persistent
+Agent workspace. Keep the shared bridge Edge window signed in.
+
 **Start Chrome, then run (Gemini web)**
 
 ```bash
@@ -111,6 +115,11 @@ Conversation. The selection is saved to the Target repo's `.bridge/config.json`,
 runs do not require repeated `--repo` or `--permissions` flags. CLI options remain available for
 scripts and automation. Start the shared bridge browser once with `bridge chrome start` and leave
 it open; the panel reuses that running browser without creating a second CDP connection.
+
+Agent mode is persistent: after each task it keeps the same web Conversation and settings, shows
+the previous result, clears the Task field, and waits for the next task. Set `New Conversation` to
+`yes` only when a task should start without prior context; press Escape to leave the workspace.
+Repo and Task fields support cursor movement, insertion, Backspace, Delete, and Ctrl+A.
 
 ### Browser profile policy
 
@@ -183,6 +192,15 @@ Provider web pages change over time. If a Provider cannot find its composer, con
 bridge-managed profile is signed in first; if it is, its selectors may need updating. ChatGPT is
 the currently verified read/write path, while the same protocol is available to the other chat
 Providers through their adapters.
+
+### Permission boundary
+
+`auto` means automatic access inside the Target repo, not unrestricted computer access. Known
+read, patch (including text-file creation and deletion), and allowlisted test Tools may run there.
+Every file path is normalized and validated first; absolute paths, `..` escapes, and paths outside
+the Target repo are rejected. The Bridge exposes no raw shell. Any future unclassified process
+Tool requires explicit human review even in `auto` mode and fails with
+`process-review-required` until such a review path is implemented.
 
 ## Usage
 
