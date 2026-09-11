@@ -1,10 +1,13 @@
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { executeRepositoryTool } from "./mcpServer.ts";
 
 const temporaryDirectories: string[] = [];
+const execFileAsync = promisify(execFile);
 
 const repositoryDirectory = async (): Promise<string> => {
   const directory = await mkdtemp(join(tmpdir(), "bridge-repository-tool-"));
@@ -87,6 +90,7 @@ describe("repository tool execution", () => {
 
   it("applies a multiline patch supplied as JSON-safe lines", async () => {
     const repoRoot = await repositoryDirectory();
+    await execFileAsync("git", ["init"], { cwd: repoRoot });
     const toolResult = await executeRepositoryTool({
       repoRoot,
       permissionMode: "auto",
@@ -107,6 +111,16 @@ describe("repository tool execution", () => {
     expect((await readFile(join(repoRoot, "hello.txt"), "utf8")).replaceAll("\r\n", "\n")).toBe(
       "hello from patch lines\n",
     );
+
+    const diffResult = await executeRepositoryTool({
+      repoRoot,
+      permissionMode: "read-only",
+      name: "git_diff",
+      args: {},
+    });
+    expect(diffResult.ok).toBe(true);
+    expect(diffResult.output).toContain("hello.txt");
+    expect(diffResult.output).toContain("+hello from patch lines");
   });
 
   it("rejects invalid arguments before a handler runs", async () => {

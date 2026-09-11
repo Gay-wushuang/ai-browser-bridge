@@ -576,17 +576,51 @@ const runTestsTool: ToolDef = {
 
 const gitDiff = async (args: Record<string, unknown>): Promise<{ ok: boolean; output: string }> => {
   const repoRoot = String(args._repoRoot);
-  const [stat, diff] = await Promise.all([
+  const [workingStat, stagedStat, workingDiff, stagedDiff, untracked] = await Promise.all([
     runProcess(["git", "diff", "--stat"], repoRoot, { timeoutMs: 10_000 }),
+    runProcess(["git", "diff", "--cached", "--stat"], repoRoot, { timeoutMs: 10_000 }),
     runProcess(["git", "diff"], repoRoot, { timeoutMs: 20_000 }),
+    runProcess(["git", "diff", "--cached"], repoRoot, { timeoutMs: 20_000 }),
+    runProcess(["git", "ls-files", "--others", "--exclude-standard", "-z"], repoRoot, {
+      timeoutMs: 10_000,
+    }),
   ]);
-  const combined = `--- stat ---\n${stat.stdout}\n\n--- diff ---\n${diff.stdout}`;
+  const failed = [workingStat, stagedStat, workingDiff, stagedDiff, untracked].find(
+    (outcome) => outcome.code !== 0,
+  );
+  if (failed !== undefined) {
+    return { ok: false, output: trimOutput(processFailureText(failed)) };
+  }
+  const untrackedPaths = untracked.stdout
+    .split("\0")
+    .filter((path) => path.length > 0)
+    .slice(0, 50);
+  const untrackedDiffs = await Promise.all(
+    untrackedPaths.map(async (path) => {
+      const outcome = await runProcess(
+        ["git", "diff", "--no-index", "--", "/dev/null", path],
+        repoRoot,
+        {
+          timeoutMs: 20_000,
+        },
+      );
+      if (outcome.code === 0 || outcome.code === 1) return outcome.stdout;
+      return `Untracked file: ${path}\n${processFailureText(outcome)}`;
+    }),
+  );
+  const statText = [workingStat.stdout, stagedStat.stdout]
+    .filter((text) => text.length > 0)
+    .join("\n");
+  const diffText = [workingDiff.stdout, stagedDiff.stdout, ...untrackedDiffs]
+    .filter((text) => text.length > 0)
+    .join("\n");
+  const combined = `--- stat ---\n${statText}\n\n--- diff ---\n${diffText}`;
   return { ok: true, output: trimOutput(combined) };
 };
 
 const gitDiffTool: ToolDef = {
   name: "git_diff",
-  description: "Show the current git diff and diff stat for the working tree.",
+  description: "Show staged, unstaged, and untracked changes in the current repository.",
   annotations: { title: "Show git diff", readOnlyHint: true, openWorldHint: false },
   argsSchema: GitDiffArgsSchema,
   handler: gitDiff,
