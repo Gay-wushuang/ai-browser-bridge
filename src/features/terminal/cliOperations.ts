@@ -3610,7 +3610,7 @@ const agentPermissionMode = (
 };
 
 const agentMaxTurns = (value: string | undefined): number => {
-  if (value === undefined) return 12;
+  if (value === undefined) return 24;
   const parsed = Number.parseInt(value, 10);
   if (Number.isSafeInteger(parsed) && parsed > 0 && parsed <= 50) return parsed;
   return fail("--max-turns must be an integer from 1 to 50.");

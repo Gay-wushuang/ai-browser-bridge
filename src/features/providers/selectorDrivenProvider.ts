@@ -298,6 +298,31 @@ export const selectorDrivenProvider = (providerId: BridgeProviderId): BrowserPro
     await page.goto(url, { waitUntil: "domcontentloaded" });
   };
 
+  const waitForFreshChat = async (page: Page): Promise<void> => {
+    const assistantSelector = profile.selectors.assistant;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      let consecutiveEmptyReads = 0;
+      for (let poll = 0; poll < 15; poll += 1) {
+        const assistantCount = await page
+          .locator(assistantSelector)
+          .count()
+          .catch(() => 0);
+        if (assistantCount === 0) {
+          consecutiveEmptyReads += 1;
+          if (consecutiveEmptyReads >= 5) return;
+        } else {
+          consecutiveEmptyReads = 0;
+        }
+        await page.waitForTimeout(300).catch(() => undefined);
+      }
+      if (attempt === 0) {
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await waitForComposerReady(page);
+      }
+    }
+    throw new Error(`${displayName}: new conversation did not become empty after navigation.`);
+  };
+
   const newConversation = async (page: Page): Promise<void> => {
     const newChatSelector = profile.selectors.newChat;
     if (newChatSelector !== undefined) {
@@ -308,11 +333,13 @@ export const selectorDrivenProvider = (providerId: BridgeProviderId): BrowserPro
         .then(() => true)
         .catch(() => false);
       if (newChatClicked) {
-        await page.waitForTimeout(400).catch(() => undefined);
+        await waitForFreshChat(page);
         return;
       }
     }
     await page.goto(defaultUrl, { waitUntil: "domcontentloaded" });
+    await waitForComposerReady(page);
+    await waitForFreshChat(page);
   };
 
   const detectCurrentModel = async (page: Page): Promise<string> => {

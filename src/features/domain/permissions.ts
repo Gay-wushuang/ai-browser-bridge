@@ -3,7 +3,13 @@ import type { ToolResult } from "./types.ts";
 
 export const PERMISSION_MODES = ["read-only", "ask", "auto"] as const;
 
-const READ_TOOLS = new Set(["grep_code", "read_file", "git_diff", "chatgpt_list_attachments"]);
+const READ_TOOLS = new Set([
+  "list_files",
+  "grep_code",
+  "read_file",
+  "git_diff",
+  "chatgpt_list_attachments",
+]);
 const WRITE_TOOLS = new Set(["apply_patch", "chatgpt_download_attachment", "chatgpt_download_all"]);
 const TEST_TOOLS = new Set(["run_tests"]);
 

@@ -157,7 +157,7 @@ const registerHeadlessCommands = (program: Command): void => {
     .option("-r, --repo <path>", "Target repository for local tools")
     .option("--provider <name>", PROVIDER_OPTION)
     .option("--permissions <mode>", "Tool permissions: read-only or auto (default read-only)")
-    .option("--max-turns <number>", "Maximum web/tool turns (default 12)")
+    .option("--max-turns <number>", "Maximum web/tool turns (default 24)")
     .option("--timeout <seconds>", "Maximum seconds per web reply")
     .option("--fresh", "Start a new conversation before the task")
     .option("--conversation <idOrUrl>", "Open a Conversation before the task")

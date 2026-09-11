@@ -159,7 +159,7 @@ export const PROVIDER_CONFIG: ProviderConfigTable = parseConfig(ProviderConfigTa
     defaultModel: "DeepSeek",
     selectors: {
       composer: "textarea#chat-input, textarea",
-      assistant: ".ds-markdown",
+      assistant: ".ds-assistant-message-main-content",
       stop: 'div[role="button"][aria-label*="Stop"]',
       sidebarItem: 'a[href*="/a/chat/s/"]',
       attach: 'input[type="file"]',

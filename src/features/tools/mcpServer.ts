@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -29,6 +29,7 @@ import {
   GitDiffArgsSchema,
   GrepCodeArgsSchema,
   ListAttachmentsArgsSchema,
+  ListFilesArgsSchema,
   ReadFileArgsSchema,
   RunTestsArgsSchema,
 } from "./toolsSchemas.ts";
@@ -261,6 +262,88 @@ const readFileToolDef: ToolDef = {
   handler: readFileTool,
 };
 
+const EXCLUDED_TREE_DIRECTORIES = new Set([".git", ".bridge", "node_modules", "dist", "build"]);
+
+type FileTreeState = {
+  readonly lines: string[];
+  readonly maxEntries: number;
+  truncated: boolean;
+};
+
+const boundedTreeNumber = (value: unknown, defaultValue: number, maximum: number): number => {
+  if (value === undefined) return defaultValue;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) return defaultValue;
+  return Math.min(parsed, maximum);
+};
+
+const appendDirectoryTree = async (input: {
+  readonly directory: string;
+  readonly prefix: string;
+  readonly remainingDepth: number;
+  readonly state: FileTreeState;
+}): Promise<void> => {
+  if (input.remainingDepth === 0 || input.state.truncated) return;
+  const entries = await readdir(input.directory, { withFileTypes: true });
+  entries.sort((left, right) => {
+    if (left.isDirectory() !== right.isDirectory()) return left.isDirectory() ? -1 : 1;
+    return left.name.localeCompare(right.name);
+  });
+  for (const entry of entries) {
+    if (entry.isDirectory() && EXCLUDED_TREE_DIRECTORIES.has(entry.name)) continue;
+    if (input.state.lines.length >= input.state.maxEntries) {
+      input.state.truncated = true;
+      return;
+    }
+    const suffix = entry.isDirectory() ? "/" : entry.isSymbolicLink() ? " -> [symlink]" : "";
+    input.state.lines.push(`${input.prefix}${entry.name}${suffix}`);
+    if (!entry.isDirectory()) continue;
+    await appendDirectoryTree({
+      directory: repositoryPath(input.directory, entry.name),
+      prefix: `${input.prefix}  `,
+      remainingDepth: input.remainingDepth - 1,
+      state: input.state,
+    });
+  }
+};
+
+const listFiles = async (
+  args: Record<string, unknown>,
+): Promise<{ ok: boolean; output: string }> => {
+  const repoRoot = String(args._repoRoot);
+  const path = args.path === undefined ? "." : String(args.path);
+  const directory = repositoryPath(repoRoot, path);
+  try {
+    const directoryStat = await stat(directory);
+    if (!directoryStat.isDirectory()) return { ok: false, output: `Not a directory: ${path}` };
+    const state: FileTreeState = {
+      lines: [],
+      maxEntries: boundedTreeNumber(args.max_entries, 300, 1000),
+      truncated: false,
+    };
+    await appendDirectoryTree({
+      directory,
+      prefix: "",
+      remainingDepth: boundedTreeNumber(args.depth, 3, 8),
+      state,
+    });
+    const header = `${path.replace(/[/\\]+$/u, "") || "."}/`;
+    const truncation = state.truncated ? "\n[truncated: increase max_entries to see more]" : "";
+    return { ok: true, output: `${header}\n${state.lines.join("\n")}${truncation}` };
+  } catch (error) {
+    return { ok: false, output: error instanceof Error ? error.message : String(error) };
+  }
+};
+
+const listFilesTool: ToolDef = {
+  name: "list_files",
+  description:
+    "List a repo-relative directory as a bounded tree. Use before grep_code when file locations are unknown.",
+  annotations: { title: "List repository files", readOnlyHint: true, openWorldHint: false },
+  argsSchema: ListFilesArgsSchema,
+  handler: listFiles,
+};
+
 type RgArgsInput = {
   pattern: string;
   safePath: string;
@@ -391,7 +474,16 @@ const applyPatch = async (
 const readApplyPatchInput = (
   args: Record<string, unknown>,
 ): { patch: string; repoRoot: string } => {
-  return { patch: String(args.patch), repoRoot: String(args._repoRoot) };
+  if (typeof args.patch === "string" && args.patch.length > 0) {
+    return { patch: args.patch, repoRoot: String(args._repoRoot) };
+  }
+  if (
+    Array.isArray(args.patch_lines) &&
+    args.patch_lines.every((line) => typeof line === "string")
+  ) {
+    return { patch: `${args.patch_lines.join("\n")}\n`, repoRoot: String(args._repoRoot) };
+  }
+  throw new Error("apply_patch requires a non-empty patch or patch_lines array.");
 };
 
 const GIT_DIFF_HEADER = /^diff --git a\/(?<oldPath>.+?) b\/(?<newPath>.+)$/;
@@ -612,6 +704,7 @@ export const downloadAllAttachmentsTool: ToolDef = {
 export const toolRegistry: Map<string, ToolDef> = new Map();
 
 for (const tool of [
+  listFilesTool,
   grepTool,
   readFileToolDef,
   applyPatchTool,
@@ -629,6 +722,8 @@ const decodeRepositoryToolArgs = (
   args: Record<string, unknown>,
 ): Record<string, unknown> => {
   switch (name) {
+    case "list_files":
+      return Schema.decodeUnknownSync(ListFilesArgsSchema)(args);
     case "grep_code":
       return Schema.decodeUnknownSync(GrepCodeArgsSchema)(args);
     case "read_file":

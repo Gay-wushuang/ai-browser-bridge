@@ -20,10 +20,31 @@ export const GrepCodeArgsSchema = Schema.Struct({
 });
 export type GrepCodeArgs = Schema.Schema.Type<typeof GrepCodeArgsSchema>;
 
+export const ListFilesArgsSchema = Schema.Struct({
+  path: Schema.optional(
+    Schema.String.annotations({ description: "Repo-relative directory path; defaults to '.'." }),
+  ),
+  depth: Schema.optional(
+    Schema.Number.annotations({ description: "Maximum directory depth, from 1 to 8." }),
+  ),
+  max_entries: Schema.optional(
+    Schema.Number.annotations({ description: "Maximum returned entries, from 1 to 1000." }),
+  ),
+});
+export type ListFilesArgs = Schema.Schema.Type<typeof ListFilesArgsSchema>;
+
 export const ApplyPatchArgsSchema = Schema.Struct({
-  patch: Schema.String.annotations({
-    description: "Unified diff patch accepted by git apply.",
-  }),
+  patch: Schema.optional(
+    Schema.String.annotations({
+      description: "Unified diff patch accepted by git apply.",
+    }),
+  ),
+  patch_lines: Schema.optional(
+    Schema.Array(Schema.String).annotations({
+      description:
+        "Unified diff as one string per line. Prefer this in JSON protocols to avoid raw newline escaping failures.",
+    }),
+  ),
 });
 export type ApplyPatchArgs = Schema.Schema.Type<typeof ApplyPatchArgsSchema>;
 

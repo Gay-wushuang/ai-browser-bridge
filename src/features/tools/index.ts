@@ -29,6 +29,8 @@ export {
   GrepCodeArgsSchema,
   type ListAttachmentsArgs,
   ListAttachmentsArgsSchema,
+  type ListFilesArgs,
+  ListFilesArgsSchema,
   type ReadFileArgs,
   ReadFileArgsSchema,
   type RunTestsArgs,

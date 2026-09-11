@@ -22,7 +22,7 @@ ChatGPT is at its best in the browser — real account state, the model picker, 
 
 `ai-browser-bridge` connects those two surfaces. It reuses a signed-in Chrome or Edge profile,
 drives the Provider's real web UI, and gives the web AI a narrow set of validated repository Tools:
-`grep_code`, `read_file`, `apply_patch`, `run_tests`, and `git_diff`. You keep the capabilities and
+`list_files`, `grep_code`, `read_file`, `apply_patch`, `run_tests`, and `git_diff`. You keep the capabilities and
 Conversation history of your web subscription while local access remains inside the selected repo.
 
 There are two local-Tool paths. `bridge agent` works through a structured text loop and does not
@@ -173,7 +173,10 @@ node dist/bridge.js agent "fix the failing browser runtime test" \
 tool request per turn; the Bridge validates it and reuses the existing `grep_code`, `read_file`,
 `apply_patch`, `run_tests`, and `git_diff` handlers locally. It defaults to `read-only`; write and
 test tools require `--permissions auto`. The loop never exposes a raw shell, rejects paths outside
-the Target repo, and stops after 12 turns unless `--max-turns` is set.
+the Target repo, and stops after 24 web turns unless `--max-turns` is set. One web turn may batch
+up to eight independent read-only Tools; patch and test Tools remain single calls so their inputs
+can be based on inspected results. Every Tool result also carries a compact original-task and
+completed-call recap to prevent the model from losing its place.
 
 Useful options:
 
@@ -185,7 +188,7 @@ Useful options:
 | `--permissions auto` | Also permit validated patches and allowlisted tests. |
 | `--fresh` | Start a new web Conversation for the task. |
 | `--conversation <idOrUrl>` | Continue a specific existing Conversation. |
-| `--max-turns <number>` | Change the default 12-turn limit. |
+| `--max-turns <number>` | Change the default 24-turn limit. |
 | `--json` | Print a machine-readable completion result. |
 
 Provider web pages change over time. If a Provider cannot find its composer, confirm that the

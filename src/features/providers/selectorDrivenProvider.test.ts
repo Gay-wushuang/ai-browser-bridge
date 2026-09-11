@@ -51,8 +51,32 @@ describe("selectorDrivenProvider", () => {
     expect(claudeProvider.supportsMcpConnector).toBe(true);
     expect(deepseekProvider.id).toBe("deepseek");
     expect(deepseekProvider.supportsMcpConnector).toBe(false);
+    expect(PROVIDER_CONFIG.deepseek.selectors.assistant).toBe(".ds-assistant-message-main-content");
     expect(duckProvider.id).toBe("duck");
     expect(duckProvider.origin).toBe("duck.ai");
+  });
+
+  it("waits for a fresh DeepSeek conversation to remain empty", async () => {
+    const observedCounts = [0, 0, 2, 0, 0, 0, 0, 0];
+    let countReads = 0;
+    const page = {
+      goto: async () => undefined,
+      waitForSelector: async () => undefined,
+      waitForTimeout: async () => undefined,
+      reload: async () => undefined,
+      locator: () => ({
+        count: async () => {
+          const count = observedCounts[countReads];
+          countReads += 1;
+          if (count === undefined) return 0;
+          return count;
+        },
+      }),
+    } as unknown as Page;
+
+    await deepseekProvider.newConversation(page);
+
+    expect(countReads).toBe(8);
   });
 
   it("recognizes short model labels and rejects empty or long ordinary text", () => {

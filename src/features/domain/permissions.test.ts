@@ -20,6 +20,7 @@ describe("normalizePermissionMode", () => {
 
 describe("toolPermissionKind", () => {
   it("classifies known read tools", () => {
+    expect(toolPermissionKind("list_files")).toBe("read");
     expect(toolPermissionKind("read_file")).toBe("read");
     expect(toolPermissionKind("grep_code")).toBe("read");
     expect(toolPermissionKind("git_diff")).toBe("read");

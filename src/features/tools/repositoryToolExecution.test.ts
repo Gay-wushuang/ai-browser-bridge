@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -19,6 +19,41 @@ afterEach(async () => {
 });
 
 describe("repository tool execution", () => {
+  it("lists a bounded repository tree without generated directories", async () => {
+    const repoRoot = await repositoryDirectory();
+    await mkdir(join(repoRoot, "src", "nested"), { recursive: true });
+    await mkdir(join(repoRoot, "node_modules", "ignored"), { recursive: true });
+    await writeFile(join(repoRoot, "src", "main.ts"), "export {};\n");
+    await writeFile(join(repoRoot, "src", "nested", "feature.ts"), "export {};\n");
+
+    const toolResult = await executeRepositoryTool({
+      repoRoot,
+      permissionMode: "read-only",
+      name: "list_files",
+      args: { path: ".", depth: 3 },
+    });
+
+    expect(toolResult.ok).toBe(true);
+    expect(toolResult.output).toContain("src/");
+    expect(toolResult.output).toContain("  main.ts");
+    expect(toolResult.output).toContain("    feature.ts");
+    expect(toolResult.output).not.toContain("node_modules");
+  });
+
+  it("rejects directory traversal when listing files", async () => {
+    const repoRoot = await repositoryDirectory();
+
+    const toolResult = await executeRepositoryTool({
+      repoRoot,
+      permissionMode: "read-only",
+      name: "list_files",
+      args: { path: ".." },
+    });
+
+    expect(toolResult).toMatchObject({ ok: false, error: "tool-handler-error" });
+    expect(toolResult.output).toContain("Path escapes repo root");
+  });
+
   it("reads a file through the same validated handler used by MCP", async () => {
     const repoRoot = await repositoryDirectory();
     await writeFile(join(repoRoot, "hello.txt"), "hello from repository tool\n");
@@ -48,6 +83,30 @@ describe("repository tool execution", () => {
       ok: false,
       error: "permission-mode-read-only",
     });
+  });
+
+  it("applies a multiline patch supplied as JSON-safe lines", async () => {
+    const repoRoot = await repositoryDirectory();
+    const toolResult = await executeRepositoryTool({
+      repoRoot,
+      permissionMode: "auto",
+      name: "apply_patch",
+      args: {
+        patch_lines: [
+          "diff --git a/hello.txt b/hello.txt",
+          "new file mode 100644",
+          "--- /dev/null",
+          "+++ b/hello.txt",
+          "@@ -0,0 +1 @@",
+          "+hello from patch lines",
+        ],
+      },
+    });
+
+    expect(toolResult.ok).toBe(true);
+    expect((await readFile(join(repoRoot, "hello.txt"), "utf8")).replaceAll("\r\n", "\n")).toBe(
+      "hello from patch lines\n",
+    );
   });
 
   it("rejects invalid arguments before a handler runs", async () => {
