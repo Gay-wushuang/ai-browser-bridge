@@ -38,7 +38,10 @@ export type WebToolAgentResult = {
 export type WebToolAgentProgress = (message: string) => void;
 
 const JSON_FENCE = /```(?:json)?\s*(?<json>\{[\s\S]*?\})\s*```/iu;
+const FENCED_PATCH_BLOCK = /^```(?:diff|patch)\s*(?<patch>[\s\S]+?)\s*```\s*$/iu;
+const RAW_COMPLETION = /^COMPLETE\s*\r?\n(?<summary>[\s\S]+)$/iu;
 const MAX_BATCH_TOOL_CALLS = 8;
+const MAX_CONSECUTIVE_PROTOCOL_ERRORS = 3;
 const BATCH_TOOL_NAMES = new Set<WebToolName>(["list_files", "grep_code", "read_file", "git_diff"]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
@@ -53,6 +56,21 @@ const protocolJson = (reply: string): string => {
   const fencedJson = JSON_FENCE.exec(reply)?.groups?.json;
   if (fencedJson !== undefined) return fencedJson;
   return reply.trim();
+};
+
+const rawPatchFromReply = (reply: string): string | undefined => {
+  const trimmed = reply.trim();
+  let candidate = trimmed;
+  if (/^APPLY_PATCH(?:\s|$)/iu.test(candidate)) {
+    candidate = candidate.replace(/^APPLY_PATCH\s*/iu, "");
+  } else if (!candidate.startsWith("```diff") && !candidate.startsWith("```patch")) {
+    return undefined;
+  }
+  const fencedPatch = FENCED_PATCH_BLOCK.exec(candidate)?.groups?.patch;
+  const patch = fencedPatch === undefined ? candidate : fencedPatch;
+  const normalized = patch.trim();
+  if (!normalized.startsWith("diff --git ") && !normalized.startsWith("--- ")) return undefined;
+  return normalized;
 };
 
 const parseWebToolCall = (value: unknown): WebToolCall => {
@@ -84,6 +102,14 @@ const parseWebToolBatch = (parsed: Record<string, unknown>): WebToolBatch => {
 export const parseWebToolReply = (
   reply: string,
 ): WebToolCall | WebToolBatch | WebToolCompletion => {
+  const rawPatch = rawPatchFromReply(reply);
+  if (rawPatch !== undefined) {
+    return { type: "tool_call", name: "apply_patch", arguments: { patch: rawPatch } };
+  }
+  const rawSummary = RAW_COMPLETION.exec(reply.trim())?.groups?.summary;
+  if (rawSummary !== undefined && rawSummary.trim().length > 0) {
+    return { type: "complete", summary: rawSummary.trim() };
+  }
   const parsed: unknown = JSON.parse(protocolJson(reply));
   if (!isRecord(parsed)) throw new Error("Web AI reply must be one JSON object.");
   if (parsed.type === "complete" && typeof parsed.summary === "string") {
@@ -101,18 +127,23 @@ const agentProtocolPrompt = (task: string, permissionMode: PermissionMode): stri
     "Act as a coding agent for a local repository. You can request sandboxed repository tools.",
     "This JSON conversation protocol is your tool access. Do not look for tools in the website UI.",
     "Your first response must be a list_files, grep_code, or read_file tool_call, or a read-only tool_calls batch; never complete.",
-    "Return exactly one JSON object and no prose or Markdown fences.",
+    "Return exactly one protocol response. Ordinary tool calls use one JSON object with no prose or Markdown fences.",
+    "Multiline apply_patch is the exception: use the raw APPLY_PATCH form below, not JSON.",
     "Tool call shape:",
     '{"type":"tool_call","name":"read_file","arguments":{"path":"README.md"}}',
     "Batch shape (1-8 read-only calls):",
     '{"type":"tool_calls","calls":[{"type":"tool_call","name":"read_file","arguments":{"path":"README.md"}},{"type":"tool_call","name":"read_file","arguments":{"path":"package.json"}}]}',
     "Completion shape:",
     '{"type":"complete","summary":"What changed and verification performed."}',
+    "For a multiline patch, prefer this raw form instead of JSON:",
+    "APPLY_PATCH\n```diff\n<complete unified diff accepted by git apply>\n```",
+    "For a multiline completion summary, this raw form is also valid:",
+    "COMPLETE\n<summary text>",
     "Available tools:",
     '- list_files: {"path"?:string,"depth"?:number,"max_entries"?:number}',
     '- grep_code: {"pattern":string,"path":string,"glob"?:string}',
     '- read_file: {"path":string,"start_line"?:number,"max_lines"?:number}',
-    '- apply_patch: {"patch_lines":string[]} (preferred) or {"patch":string}; use a unified diff accepted by git apply, never *** Begin Patch syntax',
+    '- apply_patch: use the raw APPLY_PATCH block above; JSON {"patch_lines":string[]} or {"patch":string} is also accepted',
     'New-file patch_lines example: ["diff --git a/hello.txt b/hello.txt","new file mode 100644","--- /dev/null","+++ b/hello.txt","@@ -0,0 +1 @@","+hello"]',
     '- run_tests: {"command":string}',
     "- git_diff: {}",
@@ -120,7 +151,7 @@ const agentProtocolPrompt = (task: string, permissionMode: PermissionMode): stri
     "If file locations are unknown, call list_files before grep_code. Inspect before editing.",
     "Batch independent list_files, grep_code, read_file, and git_diff calls when possible.",
     "apply_patch and run_tests must each be requested alone after relevant inspection results.",
-    "Use patch_lines for multiline patches. JSON-escape quotes and backslashes inside every array item.",
+    "Use the raw APPLY_PATCH block for multiline patches so code does not require JSON escaping.",
     "Keep patches minimal. Run focused tests and git_diff before completion.",
     "Never request shell commands, absolute paths, files outside the repository, or Git commits.",
     "If a tool fails, inspect its result and recover with another valid tool call.",
@@ -177,6 +208,7 @@ export const runWebToolAgent = async (input: {
   input.engine.permissionMode = input.permissionMode;
   let nextPrompt = agentProtocolPrompt(input.task, input.permissionMode);
   let toolCalls = 0;
+  let consecutiveProtocolErrors = 0;
   const calledTools = new Set<WebToolName>();
   const completedCalls: CompletedToolCall[] = [];
   for (let turn = 1; turn <= input.maxTurns; turn += 1) {
@@ -189,14 +221,23 @@ export const runWebToolAgent = async (input: {
       protocolReply = parseWebToolReply(message.content);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      consecutiveProtocolErrors += 1;
+      if (consecutiveProtocolErrors >= MAX_CONSECUTIVE_PROTOCOL_ERRORS) {
+        throw new Error(
+          `Web AI returned invalid protocol ${consecutiveProtocolErrors} consecutive times. Last error: ${errorMessage}`,
+        );
+      }
       nextPrompt = [
         "PROTOCOL_ERROR",
         `Your previous response was not valid protocol JSON: ${errorMessage}`,
         `Original task: ${input.task}`,
-        "Resend exactly one valid JSON object. Escape every quote and newline inside string values.",
+        "Resend one valid protocol response.",
+        "For apply_patch, use APPLY_PATCH followed by one ```diff fenced unified diff; do not put the patch in JSON.",
+        "For other tool calls, send exactly one valid JSON object and escape quotes inside string values.",
       ].join("\n");
       continue;
     }
+    consecutiveProtocolErrors = 0;
     if (protocolReply.type === "complete") {
       if (toolCalls === 0) {
         nextPrompt = [
